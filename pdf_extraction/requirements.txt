@@ -1,0 +1,6 @@
+pymupdf==1.23.6  # PDF text extraction  
+pandas==2.1.4  # Data handling  
+numpy==1.26.3  # Numerical operations  
+openpyxl==3.1.2  # Exporting to Excel  
+pdfplumber==0.10.3  # Alternative PDF extraction (optional)  
+pypdf2==3.0.1  # Alternative PDF parsing (optional)  
