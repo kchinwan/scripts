@@ -44,10 +44,14 @@ def fetch_metrics():
             logging.warning(f"Failed to fetch data for {server}")
     return pd.DataFrame(metrics_data, columns=["Server", "CPU Usage", "Disk Usage"])
 
-# Train anomaly detection model with hyperparameter tuning
+# Train anomaly detection model with hyperparameter tuning using real server data
 def train_model():
-    # Dummy historical data (Replace with real data)
-    historical_data = np.random.rand(100, 2) * 100  # Simulated CPU & Disk usage
+    historical_data = fetch_metrics()
+    if historical_data.empty:
+        logging.error("No historical data available for training.")
+        return None
+    
+    X_train = historical_data[["CPU Usage", "Disk Usage"]].values
     
     param_grid = {
         'n_estimators': [50, 100, 200],
@@ -57,11 +61,17 @@ def train_model():
     
     model = IsolationForest()
     grid_search = GridSearchCV(model, param_grid, scoring='accuracy', cv=3)
-    grid_search.fit(historical_data)
+    grid_search.fit(X_train)
     best_model = grid_search.best_estimator_
     logging.info(f"Best model parameters: {grid_search.best_params_}")
     
     return best_model
+
+# Calculate dynamic thresholds
+def calculate_dynamic_thresholds(df):
+    df['CPU Threshold'] = df['CPU Usage'].rolling(window=5, min_periods=1).quantile(0.95)
+    df['Disk Threshold'] = df['Disk Usage'].rolling(window=5, min_periods=1).quantile(0.95)
+    return df
 
 # Send email alert
 def send_email_alert(message):
@@ -85,18 +95,6 @@ def save_results(df):
     df.to_csv("server_anomalies.csv", index=False)
     logging.info("Results saved to server_anomalies.csv")
 
-# Generate real-time graph
-def plot_metrics(df):
-    plt.figure(figsize=(10, 5))
-    sns.lineplot(data=df, x=df.index, y="CPU Usage", label="CPU Usage")
-    sns.lineplot(data=df, x=df.index, y="Disk Usage", label="Disk Usage")
-    plt.xlabel("Time")
-    plt.ylabel("Usage (%)")
-    plt.title("Real-time Server Health Metrics")
-    plt.legend()
-    plt.savefig("server_health_graph.png")
-    logging.info("Graph saved as server_health_graph.png")
-
 # Streamlit Dashboard
 def streamlit_dashboard(df):
     st.title("Server Anomaly Detection Dashboard")
@@ -118,17 +116,23 @@ def streamlit_dashboard(df):
 # Main monitoring loop
 def monitor():
     model = train_model()
+    if model is None:
+        return
+    
     while True:
         df = fetch_metrics()
         if not df.empty:
+            df = calculate_dynamic_thresholds(df)
             predictions = model.predict(df[["CPU Usage", "Disk Usage"]])
             df["Anomaly"] = predictions
             
-            anomalies = df[df["Anomaly"] == -1]
+            anomalies = df[(df["Anomaly"] == -1) | 
+                           (df["CPU Usage"] > df["CPU Threshold"]) | 
+                           (df["Disk Usage"] > df["Disk Threshold"])]
+            
             if not anomalies.empty:
                 send_email_alert(f"Warning! Anomalies detected in: {anomalies['Server'].tolist()}")
                 save_results(anomalies)
-                plot_metrics(df)
                 
             # Run Streamlit Dashboard
             streamlit_dashboard(df)
