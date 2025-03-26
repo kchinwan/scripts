@@ -3,6 +3,7 @@ import numpy as np
 import smtplib
 import time
 import pandas as pd
+import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
 import streamlit as st
@@ -10,6 +11,7 @@ import logging
 from email.mime.text import MIMEText
 from sklearn.ensemble import IsolationForest
 from sklearn.model_selection import GridSearchCV
+from fbprophet import Prophet
 
 # Configure logging
 logging.basicConfig(filename="server_monitor.log", level=logging.INFO,
@@ -37,12 +39,13 @@ def fetch_metrics():
         response = requests.get(f"{DYNATRACE_API_URL}/{server}", headers=headers)
         if response.status_code == 200:
             data = response.json()
+            timestamp = datetime.datetime.now()
             cpu_usage = data["cpuUsage"]
             disk_usage = data["diskUsage"]
-            metrics_data.append([server, cpu_usage, disk_usage])
+            metrics_data.append([timestamp, server, cpu_usage, disk_usage])
         else:
             logging.warning(f"Failed to fetch data for {server}")
-    return pd.DataFrame(metrics_data, columns=["Server", "CPU Usage", "Disk Usage"])
+    return pd.DataFrame(metrics_data, columns=["timestamp", "Server", "CPU Usage", "Disk Usage"])
 
 # Train anomaly detection model with hyperparameter tuning using real server data
 def train_model():
@@ -72,6 +75,27 @@ def calculate_dynamic_thresholds(df):
     df['CPU Threshold'] = df['CPU Usage'].rolling(window=5, min_periods=1).quantile(0.95)
     df['Disk Threshold'] = df['Disk Usage'].rolling(window=5, min_periods=1).quantile(0.95)
     return df
+
+# Forecast anomalies 10 minutes ahead
+def forecast_anomalies(df):
+    future_time = datetime.datetime.now() + datetime.timedelta(minutes=10)
+    
+    # Forecast CPU Usage
+    cpu_df = df[['timestamp', 'CPU Usage']].rename(columns={'timestamp': 'ds', 'CPU Usage': 'y'})
+    model_cpu = Prophet()
+    model_cpu.fit(cpu_df)
+    
+    future = pd.DataFrame({'ds': [future_time]})
+    forecast_cpu = model_cpu.predict(future)['yhat'].values[0]
+    
+    # Forecast Disk Usage
+    disk_df = df[['timestamp', 'Disk Usage']].rename(columns={'timestamp': 'ds', 'Disk Usage': 'y'})
+    model_disk = Prophet()
+    model_disk.fit(disk_df)
+    
+    forecast_disk = model_disk.predict(future)['yhat'].values[0]
+    
+    return forecast_cpu, forecast_disk
 
 # Send email alert
 def send_email_alert(message):
@@ -123,16 +147,11 @@ def monitor():
         df = fetch_metrics()
         if not df.empty:
             df = calculate_dynamic_thresholds(df)
-            predictions = model.predict(df[["CPU Usage", "Disk Usage"]])
-            df["Anomaly"] = predictions
+            forecast_cpu, forecast_disk = forecast_anomalies(df)
             
-            anomalies = df[(df["Anomaly"] == -1) | 
-                           (df["CPU Usage"] > df["CPU Threshold"]) | 
-                           (df["Disk Usage"] > df["Disk Threshold"])]
-            
-            if not anomalies.empty:
-                send_email_alert(f"Warning! Anomalies detected in: {anomalies['Server'].tolist()}")
-                save_results(anomalies)
+            if forecast_cpu > df["CPU Threshold"].iloc[-1] or forecast_disk > df["Disk Threshold"].iloc[-1]:
+                send_email_alert(f"Predicted anomaly in next 10 minutes! CPU: {forecast_cpu}, Disk: {forecast_disk}")
+                save_results(df)
                 
             # Run Streamlit Dashboard
             streamlit_dashboard(df)
