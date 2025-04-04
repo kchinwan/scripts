@@ -1,0 +1,28 @@
+<html>
+<body>
+    <p>Hi Team,</p>
+    <p>The following servers are scheduled for patching:</p>
+    <table border="1" cellpadding="5">
+        <tr><th>Hostname</th><th>IP</th><th>App</th><th>Env</th><th>DB</th></tr>
+        {% for server in servers %}
+        <tr>
+            <td>{{ server.hostname }}</td>
+            <td>{{ server.ip_address }}</td>
+            <td>{{ server.application_name }}</td>
+            <td>{{ server.env }}</td>
+            <td>{{ server.db_status }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <p>Scheduled Time: <strong>{{ patch_date }}</strong></p>
+
+    <p>
+        <a href="{{ approve_link }}" style="padding: 10px; background-color: green; color: white; text-decoration: none;">Approve</a>
+        &nbsp;&nbsp;
+        <a href="{{ propose_link }}" style="padding: 10px; background-color: orange; color: white; text-decoration: none;">Propose New Time</a>
+    </p>
+
+    <p>Thanks,<br/>Automation System</p>
+</body>
+</html>
