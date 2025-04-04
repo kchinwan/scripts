@@ -27,33 +27,35 @@ def load_inventory(csv_path="inventory.csv"):
 
 
 # -------------------------
-# 3. Schedule Batches by Application, Day-wise
+# 3. Schedule Batches by App + Env (1 batch per combo)
 # -------------------------
 def schedule_batches(df):
     all_batches = []
-    unique_apps = sorted(df['application_name'].unique())  # Keep it sorted for predictability
     base_date = datetime.date.today()
 
-    for i, app in enumerate(unique_apps):
-        # Non-prod batch → Day i
-        nonprod = df[(df['application_name'] == app) & (df['environment'] == 'non-prod')].copy()
-        if not nonprod.empty:
-            batch_id = f"{app}_NP_B1"
-            schedule_time = base_date + datetime.timedelta(days=i)
-            nonprod['batch_id'] = batch_id
-            nonprod['patch_schedule_time'] = schedule_time
-            nonprod['approval_status'] = 'Pending'
-            all_batches.append(nonprod)
+    # Separate non-prod and prod groups
+    nonprod_groups = df[df['environment'] == 'non-prod'].groupby('application_name')
+    prod_groups = df[df['environment'] == 'prod'].groupby('application_name')
 
-        # Prod batch → Day i + 9
-        prod = df[(df['application_name'] == app) & (df['environment'] == 'prod')].copy()
-        if not prod.empty:
-            batch_id = f"{app}_PR_B1"
-            schedule_time = base_date + datetime.timedelta(days=i + 9)
-            prod['batch_id'] = batch_id
-            prod['patch_schedule_time'] = schedule_time
-            prod['approval_status'] = 'Pending'
-            all_batches.append(prod)
+    # Schedule non-prod batches: Day 0, 1, 2...
+    for i, (app, group_df) in enumerate(nonprod_groups):
+        batch_id = f"{app}_NP_B1"
+        schedule_time = base_date + datetime.timedelta(days=i)
+        group_df = group_df.copy()
+        group_df['batch_id'] = batch_id
+        group_df['patch_schedule_time'] = schedule_time
+        group_df['approval_status'] = 'Pending'
+        all_batches.append(group_df)
+
+    # Schedule prod batches: Day 10, 11, 12...
+    for i, (app, group_df) in enumerate(prod_groups):
+        batch_id = f"{app}_PR_B1"
+        schedule_time = base_date + datetime.timedelta(days=i + 9)
+        group_df = group_df.copy()
+        group_df['batch_id'] = batch_id
+        group_df['patch_schedule_time'] = schedule_time
+        group_df['approval_status'] = 'Pending'
+        all_batches.append(group_df)
 
     return pd.concat(all_batches) if all_batches else pd.DataFrame()
 
@@ -67,20 +69,21 @@ def save_to_mysql(df):
     print("Patch schedule saved to MySQL database.")
 
 
+
 # -------------------------
-# 5. Main Execution
+# 6. Main
 # -------------------------
 def main():
     print("Loading server inventory...")
     inventory_df = load_inventory()
 
-    print("Scheduling patches application-wise day-by-day...")
+    print("Scheduling batches (App + Env groups)...")
     scheduled_df = schedule_batches(inventory_df)
 
-    print("Saving patch schedule to MySQL...")
+    print(" Saving patch schedule to MySQL...")
     save_to_mysql(scheduled_df)
 
-    print("Scheduler complete. Total applications:", scheduled_df['application_name'].nunique())
+
 
 if __name__ == "__main__":
     main()
