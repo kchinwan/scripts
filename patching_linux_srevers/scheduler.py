@@ -1,87 +1,86 @@
 import pandas as pd
-from datetime import datetime, timedelta
+import datetime
+from sqlalchemy import create_engine
 
-def generate_patch_schedule(inventory_df, start_date=None):
-    """
-    Group servers into patch batches with priority and scheduling rules.
-    
-    Args:
-        inventory_df (pd.DataFrame): Cleaned server inventory DataFrame.
-        start_date (str): Optional starting date (format: 'YYYY-MM-DD')
-    
-    Returns:
-        pd.DataFrame: DataFrame with patch batch info and dates.
-    """
-    if start_date is None:
-        start_date = datetime.today().date()
-    else:
-        start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+# -------------------------
+# 1. DB Configuration
+# -------------------------
+DB_CONFIG = {
+    'user': 'your_user',
+    'password': 'your_password',
+    'host': 'localhost',
+    'port': 3306,
+    'database': 'patching_db'
+}
 
-    # Assign initial flags
-    inventory_df = inventory_df.copy()
-    inventory_df['batch_id'] = None
-    inventory_df['patch_date'] = None
-    inventory_df['batch_type'] = None  # non-prod / prod
+def get_engine():
+    url = f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+    return create_engine(url)
 
-    batch_id = 1
-    schedule_map = []
+# -------------------------
+# 2. Load Inventory
+# -------------------------
+def load_inventory(csv_path="inventory.csv"):
+    df = pd.read_csv(csv_path)
+    df['patch_status'] = 'Pending'
+    return df
 
-    # Define priority
-    priorities = [
-        ('non-prod', 'yes'),  # highest priority
-        ('non-prod', 'no'),
-        ('prod', 'yes'),
-        ('prod', 'no')        # lowest priority
-    ]
 
-    current_date = start_date
+# -------------------------
+# 3. Schedule Batches by Application, Day-wise
+# -------------------------
+def schedule_batches(df):
+    all_batches = []
+    unique_apps = sorted(df['application_name'].unique())  # Keep it sorted for predictability
+    base_date = datetime.date.today()
 
-    for env, db_status in priorities:
-        subset = inventory_df[
-            (inventory_df['env'] == env) &
-            (inventory_df['db_status'] == db_status) &
-            (inventory_df['batch_id'].isnull())
-        ]
-        
-        if subset.empty:
-            continue
-        
-        # Group by application
-        for app, app_df in subset.groupby('application_name'):
-            servers = app_df.copy()
-            total_servers = len(servers)
-            
-            # Chunk the servers into batches of 15-20
-            for i in range(0, total_servers, 20):
-                batch = servers.iloc[i:i+20]
-                batch_size = len(batch)
+    for i, app in enumerate(unique_apps):
+        # Non-prod batch → Day i
+        nonprod = df[(df['application_name'] == app) & (df['environment'] == 'non-prod')].copy()
+        if not nonprod.empty:
+            batch_id = f"{app}_NP_B1"
+            schedule_time = base_date + datetime.timedelta(days=i)
+            nonprod['batch_id'] = batch_id
+            nonprod['patch_schedule_time'] = schedule_time
+            nonprod['approval_status'] = 'Pending'
+            all_batches.append(nonprod)
 
-                if batch_size < 10:
-                    # Try to merge with next group (if possible)
-                    continue  # Skip for now; we'll append them later
+        # Prod batch → Day i + 9
+        prod = df[(df['application_name'] == app) & (df['environment'] == 'prod')].copy()
+        if not prod.empty:
+            batch_id = f"{app}_PR_B1"
+            schedule_time = base_date + datetime.timedelta(days=i + 9)
+            prod['batch_id'] = batch_id
+            prod['patch_schedule_time'] = schedule_time
+            prod['approval_status'] = 'Pending'
+            all_batches.append(prod)
 
-                # Assign batch
-                inventory_df.loc[batch.index, 'batch_id'] = f"B{batch_id:04}"
-                inventory_df.loc[batch.index, 'patch_date'] = current_date
-                inventory_df.loc[batch.index, 'batch_type'] = env
-                batch_id += 1
-                schedule_map.append((env, app, len(batch), current_date))
+    return pd.concat(all_batches) if all_batches else pd.DataFrame()
 
-                # For prod, delay patch date by 10 days
-                if env == 'non-prod':
-                    current_date += timedelta(days=1)
-                elif env == 'prod':
-                    current_date += timedelta(days=1)
 
-    return inventory_df, schedule_map
+# -------------------------
+# 4. Save to MySQL
+# -------------------------
+def save_to_mysql(df):
+    engine = get_engine()
+    df.to_sql("patch_schedule", con=engine, if_exists="replace", index=False)
+    print("Patch schedule saved to MySQL database.")
 
+
+# -------------------------
+# 5. Main Execution
+# -------------------------
+def main():
+    print("Loading server inventory...")
+    inventory_df = load_inventory()
+
+    print("Scheduling patches application-wise day-by-day...")
+    scheduled_df = schedule_batches(inventory_df)
+
+    print("Saving patch schedule to MySQL...")
+    save_to_mysql(scheduled_df)
+
+    print("Scheduler complete. Total applications:", scheduled_df['application_name'].nunique())
 
 if __name__ == "__main__":
-    # Test run
-    from inventory_loader import load_inventory
-    df = load_inventory("data/server_inventory.xlsx")
-    scheduled_df, schedule_map = generate_patch_schedule(df)
-    print(scheduled_df.head())
-    print("Patch Schedule Map:")
-    for row in schedule_map:
-        print(row)
+    main()
