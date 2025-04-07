@@ -46,6 +46,8 @@ def schedule_batches(df):
     pr_day_offset = 10
     np_schedule_map = {}
 
+    batch_counter = 1  # Unique batch ID counter
+
     # Helper to chunk groups into batches of ~10 servers/day
     def chunk_into_daily_batches(grouped_df):
         batches = []
@@ -58,14 +60,13 @@ def schedule_batches(df):
             count += len(group_df)
 
             if count >= 10:
-                batches.append((day, pd.concat(temp_group)))
+                batches.append((day, temp_group))
                 temp_group = []
                 count = 0
                 day += 1
 
-        # Any leftover group (less than 10)
         if temp_group:
-            batches.append((day, pd.concat(temp_group)))
+            batches.append((day, temp_group))
         return batches
 
     # Step 1: Group non-prod by (app, db_status)
@@ -81,17 +82,19 @@ def schedule_batches(df):
     # Step 2: Create daily non-prod batches (~10 servers per day)
     daily_np_batches = chunk_into_daily_batches(np_groups)
 
-    for day_offset, batch_df in daily_np_batches:
+    for day_offset, group_list in daily_np_batches:
         schedule_time = base_date + datetime.timedelta(days=day_offset)
-        for app in batch_df['application_name'].unique():
-            for db_status in batch_df['DB_status'].unique():
-                np_schedule_map[(app, db_status)] = schedule_time
-        batch_id = f"NP_BATCH_DAY{day_offset+1}"
-        batch_df = batch_df.copy()
-        batch_df['batch_id'] = batch_id
-        batch_df['patch_schedule_time'] = schedule_time
-        batch_df['approval_status'] = 'Pending'
-        all_batches.append(batch_df)
+        for group_df in group_list:
+            app = group_df['application_name'].iloc[0]
+            db_status = group_df['DB_status'].iloc[0]
+            np_schedule_map[(app, db_status)] = schedule_time
+
+            group_df = group_df.copy()
+            group_df['batch_id'] = f"NP_BATCH_{batch_counter}"
+            group_df['patch_schedule_time'] = schedule_time
+            group_df['approval_status'] = 'Pending'
+            all_batches.append(group_df)
+            batch_counter += 1
 
     # Step 3: Group prod by (app, db_status)
     pr_groups = []
@@ -122,16 +125,18 @@ def schedule_batches(df):
     for day_offset in sorted(pr_batches_by_day.keys()):
         batch_groups = pr_batches_by_day[day_offset]
         daily_pr_batches = chunk_into_daily_batches(batch_groups)
-        for offset, batch_df in daily_pr_batches:
+        for offset, group_list in daily_pr_batches:
             schedule_time = base_date + datetime.timedelta(days=day_offset + offset)
-            batch_id = f"PR_BATCH_DAY{day_offset + offset + 1}"
-            batch_df = batch_df.copy()
-            batch_df['batch_id'] = batch_id
-            batch_df['patch_schedule_time'] = schedule_time
-            batch_df['approval_status'] = 'Pending'
-            all_batches.append(batch_df)
+            for group_df in group_list:
+                group_df = group_df.copy()
+                group_df['batch_id'] = f"PR_BATCH_{batch_counter}"
+                group_df['patch_schedule_time'] = schedule_time
+                group_df['approval_status'] = 'Pending'
+                all_batches.append(group_df)
+                batch_counter += 1
 
     return pd.concat(all_batches) if all_batches else pd.DataFrame()
+
 
 
 
