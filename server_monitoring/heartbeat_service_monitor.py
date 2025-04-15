@@ -1,94 +1,89 @@
 import asyncio
-import json
 import pandas as pd
-from asyncio.subprocess import PIPE
+from datetime import datetime
 from sqlalchemy import create_engine
+import json
 
-# ---- Config ----
-
-ps_script_path = r"C:\Scripts\monitor_agent.ps1"  # Update if needed
-servers = [...]  # Full list of server names (strings)
-db_uri = "mysql+pymysql://your_user:your_pass@your_db_host/your_database"
-engine = create_engine(db_uri)
+# CONFIG
 BATCH_SIZE = 200
-TIMEOUT = 20  # seconds
+POWERSHELL_SCRIPT = r"C:\Scripts\monitor_agent.ps1"
+SERVICE_NAME = "HealthService"
+#MYSQL_URI = "mysql+pymysql://user:password@host:port/db_name"
 
-# ---- Async function to run PowerShell ----
+# Dummy server list for test
+all_servers = ["server001", "server002", "server003", "..."]  # Add your real list
 
-async def monitor_server(server):
+async def check_service(server):
     try:
         process = await asyncio.create_subprocess_exec(
-            "powershell", "-File", ps_script_path, "-ServerName", server,
-            stdout=PIPE, stderr=PIPE
+            "powershell",
+            "-ExecutionPolicy", "Bypass",
+            "-File", POWERSHELL_SCRIPT,
+            "-ServerName", server,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
 
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=TIMEOUT)
-        except asyncio.TimeoutError:
-            process.kill()
-            return {
-                "server_name": server,
-                "status": "Error",
-                "action": "Timeout while connecting"
-            }
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
 
         if stderr:
             return {
                 "server_name": server,
                 "status": "Error",
-                "action": stderr.decode().strip()
+                "action": stderr.decode().strip(),
+                "service_name": SERVICE_NAME,
+                "log_time": datetime.now()
             }
 
         try:
-            data = json.loads(stdout.decode().strip())
-            return {
-                "server_name": data.get("Server", server),
-                "status": data.get("Status", "Unknown"),
-                "action": data.get("Action", "Unknown")
-            }
-        except json.JSONDecodeError:
+            output = stdout.decode().strip()
+            data = json.loads(output)
+        except Exception as e:
             return {
                 "server_name": server,
                 "status": "Error",
-                "action": "Invalid JSON from PowerShell"
+                "action": f"Invalid JSON output: {str(e)}",
+                "service_name": SERVICE_NAME,
+                "log_time": datetime.now()
             }
 
+        return {
+            "server_name": data.get("Server", server),
+            "status": data.get("Status", "Unknown"),
+            "action": data.get("Action", "Unknown"),
+            "service_name": data.get("ServiceName", SERVICE_NAME),
+            "log_time": datetime.now()
+        }
+
+    except asyncio.TimeoutError:
+        return {
+            "server_name": server,
+            "status": "Timeout",
+            "action": "Script execution timed out",
+            "service_name": SERVICE_NAME,
+            "log_time": datetime.now()
+        }
     except Exception as e:
         return {
             "server_name": server,
             "status": "Error",
-            "action": f"Unexpected error: {str(e)}"
+            "action": f"Exception: {str(e)}",
+            "service_name": SERVICE_NAME,
+            "log_time": datetime.now()
         }
 
-# ---- Utilities ----
-
-async def process_batch(server_batch):
-    tasks = [monitor_server(s) for s in server_batch]
-    return await asyncio.gather(*tasks)
-
-def chunk_list(data, chunk_size):
-    for i in range(0, len(data), chunk_size):
-        yield data[i:i + chunk_size]
-
-def run_batches(servers):
+async def run_in_batches(servers):
     all_results = []
-
-    for i, batch in enumerate(chunk_list(servers, BATCH_SIZE), 1):
-        print(f"Processing batch {i} of {len(servers)//BATCH_SIZE + 1}")
-        results = asyncio.run(process_batch(batch))
+    for i in range(0, len(servers), BATCH_SIZE):
+        batch = servers[i:i + BATCH_SIZE]
+        print(f"Processing batch {i // BATCH_SIZE + 1} with {len(batch)} servers...")
+        tasks = [check_service(server) for server in batch]
+        results = await asyncio.gather(*tasks)
         all_results.extend(results)
-
     return all_results
 
-# ---- Main Entry ----
+def main():
+    results = asyncio.run(run_in_batches(all_servers))
 
 if __name__ == "__main__":
-    results = run_batches(servers)
-    df = pd.DataFrame(results)
-    df['log_time'] = pd.Timestamp.now()
-
-    try:
-        df.to_sql("agent_status_log", con=engine, if_exists='append', index=False)
-        print(f"Inserted {len(df)} rows into MySQL.")
-    except Exception as e:
-        print(f"DB insert failed: {e}")
+    main()
