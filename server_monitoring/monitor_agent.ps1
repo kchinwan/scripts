@@ -2,43 +2,40 @@ param (
     [string]$ServerName
 )
 
+$ServiceName = "HealthService"
+
 try {
-    $service = Get-Service -ComputerName $ServerName -Name "HealthService" -ErrorAction Stop
+    $service = Get-Service -Name $ServiceName -ComputerName $ServerName -ErrorAction Stop
 
-    if ($service.Status -ne "Running") {
-        Restart-Service -InputObject $service -Force -ErrorAction Stop
-        Start-Sleep -Seconds 5
-        $service = Get-Service -ComputerName $ServerName -Name "HealthService"
-    }
+    if ($service.Status -ne 'Running') {
+        Start-Service -InputObject $service
+        Start-Sleep -Seconds 5  # Wait briefly to confirm it starts
 
-    $action = if ($service.Status -eq "Running") {
-        "Restarted"
+        # Re-check the service status
+        $service = Get-Service -Name $ServiceName -ComputerName $ServerName -ErrorAction Stop
+
+        $action = if ($service.Status -eq 'Running') {
+            "Service was restarted successfully"
+        } else {
+            "Tried to restart but service is still not running"
+        }
     } else {
-        "Failed to Start"
+        $action = "Service is already running"
     }
 
     @{
-        Server = $ServerName
-        Status = $service.Status
-        Action = $action
+        Server      = $ServerName
+        Status      = $service.Status
+        Action      = $action
+        ServiceName = $ServiceName
     } | ConvertTo-Json -Compress
-}
-catch {
-    $message = $_.Exception.Message
 
-    if ($message -like "*RPC server is unavailable*") {
-        $message = "Unreachable: RPC Server Unavailable"
-    } elseif ($message -like "*Access is denied*") {
-        $message = "Unreachable: Access Denied"
-    } elseif ($message -like "*Cannot find any service with service name*") {
-        $message = "Unreachable: Service Not Found"
-    } elseif ($message -like "*The network path was not found*") {
-        $message = "Unreachable: Network Path Not Found"
-    }
-
+} catch {
+    $errorMsg = $_.Exception.Message
     @{
-        Server = $ServerName
-        Status = "Error"
-        Action = $message
+        Server      = $ServerName
+        Status      = "Error"
+        Action      = "Unreachable or error: $errorMsg"
+        ServiceName = $ServiceName
     } | ConvertTo-Json -Compress
 }
