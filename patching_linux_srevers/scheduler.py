@@ -34,12 +34,7 @@ def schedule_batches(df):
     import pandas as pd
 
     all_batches = []
-
-    # Base datetime is 2 days ahead with default time 10:00 AM
-    base_datetime = datetime.datetime.combine(
-        datetime.date.today() + datetime.timedelta(days=2),
-        datetime.time(hour=10, minute=0)
-    )
+    base_date = datetime.datetime.combine(datetime.date.today() + datetime.timedelta(days=2), datetime.time(hour=10, minute=0))
 
     # Split environments
     nonprod_df = df[df['environment'] == 'non-prod'].copy()
@@ -49,29 +44,32 @@ def schedule_batches(df):
     combos = df[['application_name', 'DB_status']].drop_duplicates().values.tolist()
 
     np_day_offset = 0
-    pr_day_offset = 10  # Starts after 10 days from base
+    pr_day_offset = 10
     np_schedule_map = {}
 
-    # Helper to chunk groups into batches of ~15 servers/day
-    def chunk_into_daily_batches(grouped_df):
+    # ✅ Helper to chunk groups into batches with ≤ 15 servers/day (without splitting group)
+    def chunk_into_daily_batches(grouped_dfs, max_servers_per_day=15):
         batches = []
         day = 0
         temp_group = []
         count = 0
 
-        for group_df in grouped_df:
-            temp_group.append(group_df)
-            count += len(group_df)
+        for group_df in grouped_dfs:
+            group_size = len(group_df)
 
-            if count >= 15:
-                batches.append((day, pd.concat(temp_group)))
-                temp_group = []
-                count = 0
+            if count + group_size > max_servers_per_day:
+                if temp_group:
+                    batches.append((day, pd.concat(temp_group)))
+                temp_group = [group_df]
+                count = group_size
                 day += 1
+            else:
+                temp_group.append(group_df)
+                count += group_size
 
-        # Any leftover group
         if temp_group:
             batches.append((day, pd.concat(temp_group)))
+
         return batches
 
     # Step 1: Group non-prod by (app, db_status)
@@ -84,11 +82,11 @@ def schedule_batches(df):
         if not group.empty:
             np_groups.append(group)
 
-    # Step 2: Create daily non-prod batches (~15 servers per day)
+    # Step 2: Create daily non-prod batches (≤15 servers/day)
     daily_np_batches = chunk_into_daily_batches(np_groups)
 
     for day_offset, batch_df in daily_np_batches:
-        schedule_time = base_datetime + datetime.timedelta(days=day_offset)
+        schedule_time = base_date + datetime.timedelta(days=day_offset)
         for app in batch_df['application_name'].unique():
             for db_status in batch_df['DB_status'].unique():
                 np_schedule_map[(app, db_status)] = schedule_time
@@ -116,21 +114,20 @@ def schedule_batches(df):
         if (app, db_status) in np_schedule_map:
             schedule_time = np_schedule_map[(app, db_status)] + datetime.timedelta(days=10)
         else:
-            schedule_time = base_datetime + datetime.timedelta(days=pr_day_offset)
+            schedule_time = base_date + datetime.timedelta(days=pr_day_offset)
             pr_day_offset += 1
 
-        schedule_day = (schedule_time - base_datetime).days
+        schedule_day = (schedule_time - base_date).days
         if schedule_day not in pr_batches_by_day:
             pr_batches_by_day[schedule_day] = []
         pr_batches_by_day[schedule_day].append(group_df)
 
-    # Step 5: Chunk prod batches into daily buckets (~15 servers per day)
+    # Step 5: Chunk prod batches into daily buckets (≤15 servers/day)
     for day_offset in sorted(pr_batches_by_day.keys()):
         batch_groups = pr_batches_by_day[day_offset]
         daily_pr_batches = chunk_into_daily_batches(batch_groups)
-
         for offset, batch_df in daily_pr_batches:
-            schedule_time = base_datetime + datetime.timedelta(days=day_offset + offset)
+            schedule_time = base_date + datetime.timedelta(days=day_offset + offset)
             batch_id = f"PR_BATCH_DAY{day_offset + offset + 1}"
             batch_df = batch_df.copy()
             batch_df['batch_id'] = batch_id
@@ -139,6 +136,7 @@ def schedule_batches(df):
             all_batches.append(batch_df)
 
     return pd.concat(all_batches) if all_batches else pd.DataFrame()
+
 
 
 
