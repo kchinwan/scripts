@@ -1,0 +1,44 @@
+My Contributions Till Date
+
+1. Infra Use Cases
+	•	Worked on infrastructure health monitoring use cases to track server metrics and predict anomalies.
+	•	Successfully completed UAT; however, the use case was dropped later as the infra service line moved out of scope.
+
+⸻
+
+2. GenAI Helpdesk Assistant (EAIS)
+	•	Designed and developed the first Generative AI–based Helpdesk Assistant for EAIS.
+	•	Delivered the PoC and demo to bundle leads and client, which was later approved.
+	•	Shared the idea, architecture, and codebase with the SAP team for further enhancement and scaling.
+
+⸻
+
+3. Team and Process Support
+	•	Filled the gap during Nischal’s absence by handling WSR updates and providing regular project updates to bundle leads.
+	•	Actively supported the team in daily huddles, assisting in design reviews, troubleshooting, and solution validation.
+
+⸻
+
+4. Use Cases Developed / Refactored
+	1.	Master DB Script (ServiceNow):
+	•	Automated fetching of ServiceNow tickets and maintaining up-to-date ticket data.
+	•	Implemented logic to handle exceptions and ensure data consistency.
+	2.	Optimized Intelligent Ticket Assistant:
+	•	Improved the runtime from 4–5 minutes to under 1 minute.
+	•	Scheduled it to run every minute for near real-time ticket insights.
+	3.	Aged 30-Day Ticket Alerts:
+	•	Developed alerting mechanism for leads to flag tickets aged over 30 days across all supported queues.
+	4.	Cognitive TicketSense:
+	•	Implemented LLM and embedding-based logic to identify critical tickets for each application, enabling faster triaging.
+	5.	Heartbeat Monitoring Refactoring:
+	•	Enhanced the existing logic to read input files from SharePoint, added exception handling to prevent script failures, and introduced dynamic skipping for decommissioned servers.
+	6.	P1/P2 Ticket Alerts:
+	•	Automated daily alerts to leads for high-priority (P1/P2) incidents.
+	7.	3-Day Ticket Aging Report:
+	•	Built a daily report mechanism to calculate ticket aging (excluding weekends and holidays) for 4 bundles, improving visibility of pending cases.
+
+⸻
+
+5. Ongoing & Additional Contributions
+	•	Collaborated with the team in designing the Intelligent Ticket Assessment and SOP Generation use case.
+	•	Developed a mini-PoC for anomaly prediction
